@@ -1,0 +1,42 @@
+# Generated release output (pinned vendor source and licenses are tracked)
+tweenpose-itch-release/
+tweenpose-release-cache/
+TweenPose-itchio.zip
+node_modules/
+coverage/
+
+# Credentials and user-created scenes, backups, exports and media
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+*.zip
+*.blend
+*.fbx
+*.obj
+*.mtl
+*.glb
+*.gltf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.webm
+tweenpose-project*.json
+backups/
+exports/
+projects/
+
+# Local/editor metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+*.log
+*.tmp
+*.bak

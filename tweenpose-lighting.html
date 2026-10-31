@@ -1,0 +1,146 @@
+<style>
+#lighting-panel .lt-sl{display:grid;grid-template-columns:76px 1fr 46px;gap:6px;align-items:center;font-size:12px;color:var(--mu);margin:3px 0}#lighting-panel .lt-sl input{width:100%;accent-color:var(--ac)}
+#lighting-panel .lt-row{display:flex;align-items:center;gap:6px;padding:3px 6px;border:1px solid var(--bd);border-radius:6px;margin:3px 0;cursor:pointer;font-size:12px}#lighting-panel .lt-row.sel{border-color:var(--ac);background:color-mix(in srgb,var(--ac) 16%,var(--bg))}
+#lighting-panel .lt-row span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#lighting-panel select,#lighting-panel input[type=text]{max-width:100%}#lighting-panel input[type=color]{width:34px;height:26px;padding:0;border:1px solid var(--bd);border-radius:5px;background:none}
+#lighting-panel h4{margin:10px 0 4px;font-size:11px;color:var(--mu);text-transform:uppercase;letter-spacing:.06em}#lighting-panel .lt-note{font-size:11px;color:var(--mu);margin:4px 0}
+</style>
+<script>
+const TweenLighting=(()=>{
+const T=THREE,MAXL=8,DEG=Math.PI/180,cvs=ren.domElement;
+let S,exporting=false,tNow=0,selId=null,uid=1,envRT=null,pmrem=null,sig='',envKey='';
+const rt=new Map(),group=new T.Group(),helpers=new T.Group();group.name='tweenpose-lights';scene.add(group);scene.add(helpers);
+const hemi=new T.HemisphereLight(0xffffff,0x555566,.9);group.add(hemi);
+const nid=()=>'L'+(uid++);
+const mk=(name,type,color,intensity,az,el,dist,x={})=>({id:nid(),name,type,on:true,color,intensity,az,el,dist,tx:0,ty:0,tz:0,shadow:type!=='point',angle:38,penumbra:.35,range:0,orbit:0,flicker:0,...x});
+const base=()=>({v:1,exposure:1,tone:'none',shadows:false,res:1024,soft:2,bias:-.0005,env:'none',envStr:1,amb:{c:'#ffffff',g:'#555566',i:.9},ground:{on:false,op:.35,y:-1.2,size:8},markers:true,lights:[]});
+const PRE={
+'Default (original look)':()=>({...base(),lights:[mk('Key','directional','#ffffff',.9,36.87,45,7.07,{shadow:false})]}),
+'Studio 3-point':()=>({...base(),amb:{c:'#ffffff',g:'#3a3a48',i:.25},shadows:true,env:'studio',envStr:.6,tone:'aces',lights:[mk('Key','directional','#fff2e0',2.2,40,35,6),mk('Fill','directional','#d6e4ff',.8,-50,15,6,{shadow:false}),mk('Rim','directional','#ffffff',1.6,180,30,6,{shadow:false})]}),
+'Soft box':()=>({...base(),amb:{c:'#ffffff',g:'#555566',i:.5},shadows:true,soft:6,env:'studio',envStr:.8,tone:'aces',lights:[mk('Top softbox','directional','#ffffff',1.6,0,70,6),mk('Front fill','directional','#fff6ee',.8,20,20,6,{shadow:false})]}),
+'Sunset':()=>({...base(),amb:{c:'#ffb98a',g:'#3a2a4a',i:.3},shadows:true,env:'sunset',envStr:.8,tone:'aces',exposure:1.1,lights:[mk('Sun','directional','#ff9a4a',2.6,110,10,7),mk('Sky fill','directional','#7a5cff',.7,-70,40,7,{shadow:false})]}),
+'Cinematic teal & orange':()=>({...base(),amb:{c:'#6a8aa0',g:'#10151c',i:.15},shadows:true,env:'dark',envStr:.4,tone:'aces',exposure:.95,lights:[mk('Warm key','directional','#ffb36b',2.4,50,25,6),mk('Teal rim','directional','#2ec4c4',2.2,-140,20,6,{shadow:false}),mk('Cool fill','directional','#4a6cff',.4,-40,10,6,{shadow:false})]}),
+'Neon night':()=>({...base(),amb:{c:'#202040',g:'#05050a',i:.08},env:'dark',envStr:.3,tone:'aces',exposure:1.2,lights:[mk('Magenta','point','#ff2bd6',3,60,15,4,{shadow:false}),mk('Cyan','point','#18f0ff',3,-60,10,4,{shadow:false})]}),
+'Noir spotlight':()=>({...base(),amb:{c:'#ffffff',g:'#111111',i:.04},shadows:true,soft:1,tone:'aces',lights:[mk('Spot','spot','#ffffff',4.5,50,50,6,{angle:30,penumbra:.3})]}),
+'Moonlight':()=>({...base(),amb:{c:'#4a5aa8',g:'#10131f',i:.25},shadows:true,env:'dark',envStr:.5,tone:'aces',lights:[mk('Moon','directional','#9db8ff',1.1,-30,55,7),mk('Moon rim','directional','#cfe0ff',.8,160,25,7,{shadow:false})]}),
+'Flat (even light)':()=>({...base(),amb:{c:'#ffffff',g:'#ffffff',i:1.6},lights:[]}),
+'Top-down drama':()=>({...base(),amb:{c:'#ffffff',g:'#222230',i:.1},shadows:true,tone:'aces',lights:[mk('Overhead','directional','#ffffff',3,0,85,6)]}),
+'Candle flicker':()=>({...base(),amb:{c:'#ffb070',g:'#1a1008',i:.12},shadows:true,tone:'aces',lights:[mk('Flame','point','#ff9a40',3.2,30,10,2.5,{flicker:.35,shadow:true})]})};
+const TM={none:T.NoToneMapping,aces:T.ACESFilmicToneMapping,reinhard:T.ReinhardToneMapping,cineon:T.CineonToneMapping,linear:T.LinearToneMapping};
+const cur=()=>S.lights.find(l=>l.id===selId)||null;
+const tgt=l=>new T.Vector3(l.tx,l.ty,l.tz);
+const posOf=(l,t=tNow)=>{const a=(l.az+l.orbit*t)*DEG,e=l.el*DEG,c=Math.cos(e);return new T.Vector3(l.tx+l.dist*c*Math.sin(a),l.ty+l.dist*Math.sin(e),l.tz+l.dist*c*Math.cos(a))};
+S=PRE['Default (original look)']();selId=S.lights[0]?.id||null;
+// ---------- environment ----------
+const ENV={studio:{t:[.45,.47,.52],m:[.25,.26,.3],b:[.08,.08,.1],p:[[0,15,2,14,10,[3.5,3.4,3.2]],[-14,3,4,8,12,[1.3,1.6,2.4]],[13,2,-5,8,12,[2.2,2.2,2.6]]]},
+sky:{t:[.4,.65,1.2],m:[.95,1,1],b:[.25,.25,.25],p:[[8,12,6,3,3,[8,7.4,6]]]},
+sunset:{t:[.18,.12,.4],m:[1.1,.55,.22],b:[.1,.06,.08],p:[[14,2,4,4,4,[9,4.4,1.6]]]},
+dark:{t:[.02,.02,.04],m:[.03,.03,.05],b:[.01,.01,.01],p:[[-12,3,-8,3,12,[2.5,2.8,3.5]],[12,6,8,2,10,[2.4,2,1.6]]]}};
+function makeEnv(k){const d=ENV[k],s=new T.Scene(),g=new T.SphereGeometry(20,48,24),P=g.attributes.position,c=new Float32Array(P.count*3);
+for(let i=0;i<P.count;i++){const y=P.getY(i)/20,A=y>0?d.t:d.b,w=Math.abs(y);for(let j=0;j<3;j++)c[i*3+j]=d.m[j]+(A[j]-d.m[j])*w}
+g.setAttribute('color',new T.BufferAttribute(c,3));s.add(new T.Mesh(g,new T.MeshBasicMaterial({vertexColors:true,side:T.BackSide})));
+d.p.forEach(([x,y,z,w,h,col])=>{const m=new T.Mesh(new T.PlaneGeometry(w,h),new T.MeshBasicMaterial({color:new T.Color(col[0],col[1],col[2]),side:T.DoubleSide}));m.position.set(x,y,z);m.lookAt(0,0,0);s.add(m)});
+pmrem=pmrem||new T.PMREMGenerator(ren);const rtg=pmrem.fromScene(s,0,.1,100);g.dispose();return rtg}
+function applyEnv(){if(envKey===S.env)return;envKey=S.env;if(envRT){envRT.dispose();envRT=null}scene.environment=null;if(S.env!=='none'&&ENV[S.env]){try{envRT=makeEnv(S.env);scene.environment=envRT.texture}catch(e){toast('Environment lighting is not supported on this device.')}}refreshMats()}
+function refreshMats(){root.traverse(o=>{if(o.material)[].concat(o.material).forEach(m=>m.needsUpdate=true)});groundMesh.material.needsUpdate=true}
+function sweep(){root.traverse(o=>{if(!o.isMesh)return;const wf=o.material&&!Array.isArray(o.material)&&o.material.wireframe;o.castShadow=S.shadows&&!wf&&o.material?.visible!==false;o.receiveShadow=S.shadows&&!wf;[].concat(o.material||[]).forEach(m=>{if(m.isMeshStandardMaterial&&m.envMapIntensity!==S.envStr)m.envMapIntensity=S.envStr})})}
+// ---------- ground shadow catcher ----------
+const groundMesh=new T.Mesh(new T.PlaneGeometry(1,1),new T.ShadowMaterial({opacity:.35}));groundMesh.rotation.x=-Math.PI/2;groundMesh.receiveShadow=true;groundMesh.renderOrder=-1;scene.add(groundMesh);
+function fitGround(){const b=new T.Box3().setFromObject(root);if(!b.isEmpty()){S.ground.y=+(b.min.y-.01).toFixed(2)}}
+// ---------- light objects ----------
+function structSig(){return JSON.stringify([S.shadows,S.res,S.lights.map(l=>[l.id,l.type])])}
+function rebuild(){rt.forEach(o=>{group.remove(o.light);if(o.light.target)group.remove(o.light.target);helpers.remove(o.marker);helpers.remove(o.line);o.light.shadow?.map?.dispose();o.marker.geometry.dispose();o.marker.material.dispose();o.line.geometry.dispose()});rt.clear();
+S.lights.slice(0,MAXL).forEach(l=>{let L;if(l.type==='point')L=new T.PointLight(0xffffff,1,0,1);else if(l.type==='spot')L=new T.SpotLight(0xffffff,1,0,.6,.3,1);else L=new T.DirectionalLight(0xffffff,1);
+if(L.target)group.add(L.target);group.add(L);
+if(L.shadow){L.shadow.mapSize.set(S.res,S.res);if(l.type==='directional'){const c=L.shadow.camera;c.left=-4;c.right=4;c.top=4;c.bottom=-4;c.near=.5;c.far=40;c.updateProjectionMatrix()}}
+const marker=new T.Mesh(new T.SphereGeometry(.12,16,12),new T.MeshBasicMaterial({color:0xffffff,depthTest:false,transparent:true}));marker.renderOrder=998;marker.userData.lightId=l.id;
+const line=new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(),new T.Vector3()]),new T.LineBasicMaterial({color:0xffffff,depthTest:false,transparent:true,opacity:.6}));line.renderOrder=997;
+helpers.add(marker);helpers.add(line);rt.set(l.id,{light:L,marker,line})});sig=structSig();refreshMats()}
+function update(){const g=S;if(ren.shadowMap.enabled!==g.shadows){ren.shadowMap.enabled=g.shadows;refreshMats()}ren.shadowMap.type=T.PCFShadowMap;
+const tm=TM[g.tone]||0;if(ren.toneMapping!==tm){ren.toneMapping=tm;refreshMats()}ren.toneMappingExposure=g.exposure;
+if(sig!==structSig())rebuild();applyEnv();
+hemi.color.set(g.amb.c);hemi.groundColor.set(g.amb.g);hemi.intensity=g.amb.i;
+groundMesh.visible=g.ground.on;groundMesh.position.set(0,g.ground.y,0);groundMesh.scale.set(g.ground.size,g.ground.size,1);groundMesh.material.opacity=g.ground.op;
+S.lights.slice(0,MAXL).forEach(l=>{const o=rt.get(l.id);if(!o)return;const L=o.light,p=posOf(l),t=tgt(l);
+const fl=l.flicker?Math.max(0,1+l.flicker*(Math.sin(tNow*37)*.5+Math.sin(tNow*23+1)*.5)):1;
+L.visible=l.on;L.color.set(l.color);L.intensity=l.intensity*fl;L.position.copy(p);if(L.target)L.target.position.copy(t);
+if(L.isSpotLight){L.angle=Math.max(.05,Math.min(1.5,l.angle*DEG));L.penumbra=l.penumbra}
+if(!L.isDirectionalLight)L.distance=l.range;
+if(L.shadow){L.castShadow=g.shadows&&l.shadow&&l.on;L.shadow.bias=g.bias;L.shadow.radius=g.soft}
+o.marker.position.copy(p);o.marker.material.color.set(l.color);o.marker.material.opacity=l.on?1:.3;o.marker.scale.setScalar(l.id===selId?1.5:1);
+o.line.visible=l.type!=='point';const a=o.line.geometry.attributes.position;a.setXYZ(0,p.x,p.y,p.z);a.setXYZ(1,t.x,t.y,t.z);a.needsUpdate=true;o.line.geometry.computeBoundingSphere()});
+sweep();viewVis();placeGizmo()}
+let playingNow=()=>typeof playing!=='undefined'&&playing;
+function viewVis(){const v=S.markers&&!exporting&&!playingNow();helpers.visible=v;ltc.visible=ltc.enabled=v&&!!ltc.object}
+// ---------- viewport gizmo for lights ----------
+const proxy=new T.Object3D();scene.add(proxy);const ltc=new T.TransformControls(cam,cvs);ltc.setSize(.7);scene.add(ltc);let aim=false,dmWas=null;
+function placeGizmo(){const l=cur(),on=$('#lt-edit')?.checked&&l&&!exporting;if(!on){if(ltc.object)ltc.detach();if(dmWas!==null&&window.TweenDirectManipulation){TweenDirectManipulation.setEnabled(dmWas);dmWas=null}return}
+if(window.TweenDirectManipulation&&dmWas===null){dmWas=TweenDirectManipulation.enabled;TweenDirectManipulation.setEnabled(false)}
+if(!ltc.dragging){proxy.position.copy(aim&&l.type!=='point'?tgt(l):posOf(l))}if(ltc.object!==proxy)ltc.attach(proxy)}
+ltc.addEventListener('dragging-changed',e=>{ctl.enabled=!e.value;if(!e.value)changed()});
+ltc.addEventListener('objectChange',()=>{const l=cur();if(!l)return;const p=proxy.position;if(aim&&l.type!=='point'){l.tx=p.x;l.ty=p.y;l.tz=p.z}
+else{const d=p.clone().sub(tgt(l)),r=d.length()||1e-6;l.dist=+r.toFixed(3);l.el=+(Math.asin(Math.max(-1,Math.min(1,d.y/r)))/DEG).toFixed(1);l.az=+((Math.atan2(d.x,d.z)/DEG)-l.orbit*tNow).toFixed(1)}update();fillEditor()});
+let dn=null;cvs.addEventListener('pointerdown',e=>dn=[e.clientX,e.clientY],true);
+cvs.addEventListener('pointerup',e=>{if(!dn||ltc.dragging||ltc.axis||!helpers.visible)return;if(Math.hypot(e.clientX-dn[0],e.clientY-dn[1])>4)return;dn=null;
+const r=cvs.getBoundingClientRect(),rc=new T.Raycaster();rc.setFromCamera(new T.Vector2((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1),cam);
+const h=rc.intersectObjects([...rt.values()].map(o=>o.marker),false)[0];if(h){selId=h.object.userData.lightId;renderList();fillEditor();update()}},true);
+// ---------- panel ----------
+const section=document.createElement('section');section.className='geometry-section';section.id='lighting-panel';
+section.innerHTML=`<h3>Lighting</h3>
+<div class="row"><select id="lt-pre" class="stretch" aria-label="Lighting preset"></select><button id="lt-apply">Apply</button></div>
+<h4>Lights</h4><div id="lt-list"></div><div class="row"><button id="lt-add-d">+ Sun</button><button id="lt-add-p">+ Point</button><button id="lt-add-s">+ Spot</button></div>
+<div id="lt-ed" hidden><h4>Selected light</h4><div class="row"><input id="lt-name" type="text" aria-label="Light name" style="flex:1"><input id="lt-color" type="color" aria-label="Light color"></div><div id="lt-sl"></div>
+<label><input id="lt-sh" type="checkbox"> Casts shadows</label><label><input id="lt-edit" type="checkbox"> Move in viewport</label><label id="lt-aimw"><input id="lt-aim" type="checkbox"> …move aim point instead</label></div>
+<h4>Ambient light</h4><div class="row"><label>Sky <input id="lt-ac" type="color"></label><label>Ground <input id="lt-ag" type="color"></label></div><div id="lt-g1"></div>
+<h4>Environment &amp; camera</h4><div class="row"><select id="lt-env" class="stretch" aria-label="Environment lighting"><option value="none">No environment</option><option value="studio">Studio reflections</option><option value="sky">Daylight sky</option><option value="sunset">Sunset</option><option value="dark">Dark with rim strips</option></select></div>
+<div class="row"><select id="lt-tone" class="stretch" aria-label="Tone mapping"><option value="none">No tone mapping</option><option value="aces">Filmic (ACES)</option><option value="reinhard">Reinhard</option><option value="cineon">Cineon</option><option value="linear">Linear</option></select></div><div id="lt-g2"></div>
+<h4>Shadows</h4><label><input id="lt-sg" type="checkbox"> Enable shadows</label><div class="row"><select id="lt-res" class="stretch" aria-label="Shadow quality"><option value="512">Fast (512)</option><option value="1024">Good (1024)</option><option value="2048">High (2048)</option><option value="4096">Ultra (4096)</option></select></div><div id="lt-g3"></div>
+<label><input id="lt-gd" type="checkbox"> Ground shadow (transparent)</label><div id="lt-g4"></div><div class="row"><button id="lt-fit">Fit ground to model</button></div>
+<label><input id="lt-mk" type="checkbox" checked> Show light markers</label>
+<p class="lt-note">Orbit and flicker follow the timeline, so exports match playback. Filmic tone mapping may not apply to motion-blurred frames. GIF export keeps shadows only as solid or clear pixels.</p>`;
+$('#R').append(section);
+const $$=s=>section.querySelector(s);Object.keys(PRE).forEach(k=>{const o=document.createElement('option');o.textContent=k;$$('#lt-pre').append(o)});
+function slider(host,label,get,set,min,max,step,fmt=v=>(+v).toFixed(2)){const r=document.createElement('div');r.className='lt-sl';r.innerHTML=`<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><span></span>`;host.append(r);const inp=r.querySelector('input'),out=r.lastChild;
+inp.oninput=()=>{set(+inp.value);out.textContent=fmt(inp.value);update();changed(true)};r.sync=()=>{const v=get();inp.value=v;out.textContent=fmt(v)};r.toggle=on=>r.hidden=!on;return r}
+const per=[];const ed=$$('#lt-sl');const LK=(k,lbl,min,max,step,types)=>{const r=slider(ed,lbl,()=>cur()?cur()[k]:0,v=>{if(cur())cur()[k]=v},min,max,step);r.types=types;per.push(r)};
+const ALL=['directional','point','spot'],AIM=['directional','spot'];
+LK('intensity','Intensity',0,8,.05,ALL);LK('az','Angle ↔',-180,180,1,ALL);LK('el','Height',-90,90,1,ALL);LK('dist','Distance',.5,15,.1,ALL);
+LK('tx','Aim X',-3,3,.05,AIM);LK('ty','Aim Y',-3,3,.05,AIM);LK('tz','Aim Z',-3,3,.05,AIM);LK('angle','Cone °',5,85,1,['spot']);LK('penumbra','Edge softness',0,1,.05,['spot']);LK('range','Falloff range',0,30,.5,['point','spot']);LK('orbit','Orbit °/sec',-180,180,1,ALL);LK('flicker','Flicker',0,1,.05,ALL);
+const gs=[];const G=(host,lbl,get,set,min,max,step)=>gs.push(slider($$(host),lbl,get,set,min,max,step));
+G('#lt-g1','Intensity',()=>S.amb.i,v=>S.amb.i=v,0,3,.05);G('#lt-g2','Exposure',()=>S.exposure,v=>S.exposure=v,.2,3,.05);G('#lt-g2','Env strength',()=>S.envStr,v=>S.envStr=v,0,3,.05);
+G('#lt-g3','Softness',()=>S.soft,v=>S.soft=v,0,10,.5);G('#lt-g3','Bias',()=>S.bias,v=>S.bias=v,-.01,.01,.0005);
+G('#lt-g4','Opacity',()=>S.ground.op,v=>S.ground.op=v,0,1,.05);G('#lt-g4','Height',()=>S.ground.y,v=>S.ground.y=v,-4,4,.01);G('#lt-g4','Size',()=>S.ground.size,v=>S.ground.size=v,1,30,.5);
+function renderList(){const box=$$('#lt-list');box.innerHTML='';if(!S.lights.length)box.innerHTML='<p class="lt-note">No lights. Add one below, or pick a preset.</p>';
+S.lights.forEach(l=>{const r=document.createElement('div');r.className='lt-row'+(l.id===selId?' sel':'');const cb=document.createElement('input');cb.type='checkbox';cb.checked=l.on;cb.title='On/off';
+const nm=document.createElement('span');nm.textContent=({directional:'☀ ',point:'● ',spot:'◭ '})[l.type]+l.name;const del=document.createElement('button');del.textContent='✕';del.title='Delete light';
+cb.onclick=e=>e.stopPropagation();cb.onchange=()=>{l.on=cb.checked;update();changed()};del.onclick=e=>{e.stopPropagation();S.lights=S.lights.filter(x=>x.id!==l.id);if(selId===l.id)selId=S.lights[0]?.id||null;full();changed()};
+r.onclick=()=>{selId=l.id;renderList();fillEditor();update()};r.append(cb,nm,del);box.append(r)})}
+function fillEditor(){const l=cur();$$('#lt-ed').hidden=!l;if(!l){placeGizmo();return}$$('#lt-name').value=l.name;$$('#lt-color').value=l.color;$$('#lt-sh').checked=l.shadow;$$('#lt-sh').parentElement.hidden=false;$$('#lt-aimw').hidden=l.type==='point';
+per.forEach(r=>{r.toggle(r.types.includes(l.type));if(r.types.includes(l.type))r.sync()})}
+function fillGlobal(){$$('#lt-ac').value=S.amb.c;$$('#lt-ag').value=S.amb.g;$$('#lt-env').value=S.env;$$('#lt-tone').value=S.tone;$$('#lt-sg').checked=S.shadows;$$('#lt-res').value=S.res;$$('#lt-gd').checked=S.ground.on;$$('#lt-mk').checked=S.markers;gs.forEach(r=>r.sync())}
+function full(){renderList();fillEditor();fillGlobal();update()}
+let ct=null;function changed(soft){clearTimeout(ct);ct=setTimeout(()=>{if(typeof commitSoon==='function')commitSoon();window.TweenPoseBackups?.markDirty?.()},soft?250:0)}
+$$('#lt-apply').onclick=()=>{const p=PRE[$$('#lt-pre').value]();if(S.ground.on)p.ground={...S.ground};S=p;S.lights.forEach(l=>{l.id=nid()});selId=S.lights[0]?.id||null;full();changed()};
+const add=t=>{if(S.lights.length>=MAXL)return toast('You can have up to '+MAXL+' lights.');const n=S.lights.filter(l=>l.type===t).length+1,names={directional:'Sun',point:'Point',spot:'Spot'};
+const l=mk(names[t]+' '+n,t,'#ffffff',t==='directional'?1:t==='point'?2:3,(S.lights.length*70)%360-180,35,t==='directional'?6:4,t==='spot'?{angle:35}:{shadow:false});S.lights.push(l);selId=l.id;full();changed()};
+$$('#lt-add-d').onclick=()=>add('directional');$$('#lt-add-p').onclick=()=>add('point');$$('#lt-add-s').onclick=()=>add('spot');
+$$('#lt-name').oninput=e=>{const l=cur();if(l){l.name=e.target.value||'Light';renderList();changed(true)}};
+$$('#lt-color').oninput=e=>{const l=cur();if(l){l.color=e.target.value;update();changed(true)}};
+$$('#lt-sh').onchange=e=>{const l=cur();if(l){l.shadow=e.target.checked;if(e.target.checked&&!S.shadows){S.shadows=true;fillGlobal()}update();changed()}};
+$$('#lt-edit').onchange=()=>update();$$('#lt-aim').onchange=e=>{aim=e.target.checked;update()};
+$$('#lt-ac').oninput=e=>{S.amb.c=e.target.value;update();changed(true)};$$('#lt-ag').oninput=e=>{S.amb.g=e.target.value;update();changed(true)};
+$$('#lt-env').onchange=e=>{S.env=e.target.value;update();changed()};$$('#lt-tone').onchange=e=>{S.tone=e.target.value;update();changed()};
+$$('#lt-sg').onchange=e=>{S.shadows=e.target.checked;refreshMats();update();changed()};$$('#lt-res').onchange=e=>{S.res=+e.target.value;update();changed()};
+$$('#lt-gd').onchange=e=>{S.ground.on=e.target.checked;if(e.target.checked){fitGround();if(!S.shadows){S.shadows=true;refreshMats()}}full();changed()};
+$$('#lt-fit').onclick=()=>{fitGround();full();changed()};$$('#lt-mk').onchange=e=>{S.markers=e.target.checked;update();changed()};
+setInterval(()=>{if(S.shadows||S.envStr!==1)sweep()},500);
+addEventListener('keydown',e=>{if(e.key==='Escape'&&$$('#lt-edit').checked){$$('#lt-edit').checked=false;update()}});
+ren.domElement.addEventListener('webglcontextlost',()=>{envKey=''});
+const api={settings:()=>JSON.parse(JSON.stringify(S)),
+restore(d){if(!d||typeof d!=='object'||!Array.isArray(d.lights))return;const b=base();S={...b,...JSON.parse(JSON.stringify(d)),amb:{...b.amb,...d.amb},ground:{...b.ground,...d.ground}};
+uid=Math.max(1,...S.lights.map(l=>+String(l.id).replace(/\D/g,'')||0))+1;if(!cur())selId=S.lights[0]?.id||null;S.lights=S.lights.slice(0,MAXL);envKey='';sig='';full()},
+setFrame(f){tNow=f/(+$('#fps').value||12);if(S.lights.some(l=>l.orbit||l.flicker))update();else viewVis()},
+setExporting(on){exporting=!!on;viewVis();if(on)placeGizmo()},get state(){return S},fitGround,apply:n=>{$$('#lt-pre').value=n;$$('#lt-apply').click()}};
+(function loop(){requestAnimationFrame(loop);viewVis()})();
+full();return api})();
+window.TweenLighting=TweenLighting;
+</script>

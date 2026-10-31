@@ -1,0 +1,35 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {createApp}=require('./tweenpose-app.test.cjs');
+const THREE=require('./tweenpose-tests/three-r128.cjs');
+(async()=>{
+  let localWrites=0;
+  const app=await createApp(THREE,{localStorage:{getItem:()=>null,setItem:()=>{localWrites++;throw new Error('QuotaExceededError')},removeItem(){}}});
+  await app.run('TweenPoseBackups.store.ready');
+  app.run("GeometryEditor.addShape('box',1)");app.flush();
+  assert.equal(app.run('TweenPoseBackups.store.status().mode'),'session');
+  assert.equal(await app.run("snapNow('Manual')"),true);
+  assert.equal(app.run('sget().length'),1);
+  assert.match(app.document.querySelector('#backup-status').textContent,/Session backups only/);
+  assert.match(app.document.querySelector('#backup-badge').textContent,/Session only/);
+  app.run('frame=4;evalAt(frame);TweenPoseBackups.navigation(snap())');
+  await app.run('TweenPoseBackups.flush()');
+  assert.equal(app.run('sget().length'),1,'navigation never marks a project dirty');
+  app.run('parts[1].o.position.x+=.25;TweenPoseBackups.markDirty()');
+  await app.run('TweenPoseBackups.flush()');
+  assert.equal(app.run('sget().length'),2,'unkeyed manual transforms autosave');
+  app.run('TweenPoseBackups.markDirty()');await app.run('TweenPoseBackups.flush()');
+  assert.equal(app.run('sget().length'),2,'unchanged projects skip automatic backups');
+  assert.equal(localWrites,0,'project snapshots never write localStorage');
+
+  const disk=[];let picked=0;
+  const fileApp=await createApp(THREE,{showSaveFilePicker:async()=>{picked++;return {createWritable:async()=>({write:async text=>disk.push(JSON.parse(text)),close:async()=>{},abort:async()=>{}})}}});
+  await fileApp.run('TweenPoseBackups.store.ready');fileApp.run("GeometryEditor.addShape('box',1)");fileApp.flush();
+  await fileApp.document.querySelector('#backup-choose-file').onclick();
+  assert.equal(picked,1);assert.equal(disk.length,1);assert.ok(disk[0].g[1].base);
+  fileApp.run('parts[1].o.position.x+=.5;TweenPoseBackups.markDirty()');await fileApp.run('TweenPoseBackups.flush()');
+  assert.equal(disk.length,2,'edits also autosave to the user-chosen project file');
+  assert.equal(fileApp.document.querySelector('#backup-badge').textContent,'File autosave on');
+  await fileApp.document.querySelector('#backup-save-file').onclick();assert.equal(disk.length,3);
+  console.log('Storage UI integration passed: session fallback, no localStorage writes, navigation suppression, unkeyed transforms, direct file autosave.');
+})().catch(error=>{console.error(error);process.exitCode=1});
